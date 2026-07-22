@@ -1,0 +1,13 @@
+{
+  "report_id": "20260221_143505",
+  "generated_at": "2026-02-21T14:35:05.790500",
+  "summary": {
+    "total_violations": 0,
+    "by_severity": {},
+    "by_type": {},
+    "by_table": {}
+  },
+  "violations": [],
+  "policies": [],
+  "compliance_score": 100.0
+}

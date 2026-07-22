@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+:root {
+  --background: #0d0d0f;
+  --foreground: #ececf1;
+  --card: #202123;
+  --card-hover: #343541;
+  --border: #40414f;
+  --muted: #8e8ea0;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Card Styles */
+@layer components {
+  .card {
+    @apply bg-dark-900 border border-dark-700 rounded-xl p-6 transition-all duration-200;
+  }
+
+  .card:hover {
+    @apply border-dark-600;
+  }
+
+  .card-header {
+    @apply text-sm font-medium text-dark-400 uppercase tracking-wider mb-2;
+  }
+
+  .btn-primary {
+    @apply bg-accent-primary hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-dark-700 hover:bg-dark-600 text-dark-100 font-medium py-2 px-4 rounded-lg border border-dark-600 transition-all duration-200;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-success {
+    @apply bg-green-500/20 text-green-400;
+  }
+
+  .status-warning {
+    @apply bg-yellow-500/20 text-yellow-400;
+  }
+
+  .status-danger {
+    @apply bg-red-500/20 text-red-400;
+  }
+
+  .status-info {
+    @apply bg-cyan-500/20 text-cyan-400;
+  }
+
+  .input-field {
+    @apply bg-dark-800 border border-dark-600 rounded-lg px-4 py-2 text-dark-100 placeholder-dark-500 focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all duration-200;
+  }
+
+  .table-header {
+    @apply text-left text-xs font-medium text-dark-400 uppercase tracking-wider py-3 px-4;
+  }
+
+  .table-cell {
+    @apply py-4 px-4 text-sm text-dark-200 border-t border-dark-700;
+  }
+}
+
+/* Pulse Animation for Status Indicators */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.pulse-indicator {
+  position: relative;
+}
+
+.pulse-indicator::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-ring 2s ease-out infinite;
+  opacity: 0.5;
+}
+
+/* Gradient Text */
+.gradient-text {
+  background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glass Effect */
+.glass {
+  background: rgba(32, 33, 35, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(64, 65, 79, 0.5);
+}

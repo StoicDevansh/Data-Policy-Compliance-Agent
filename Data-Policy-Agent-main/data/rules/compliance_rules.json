@@ -1,0 +1,439 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "created": "2026-02-21",
+    "description": "Pre-configured compliance rules for HackFest 2.0 datasets (IBM AML, PaySim, Employee Compliance)"
+  },
+  "rule_sets": {
+    "aml_transactions": {
+      "name": "Anti-Money Laundering Transaction Rules",
+      "policy_source": "aml_compliance_policy.md",
+      "dataset": "IBM Transactions for Anti-Money Laundering",
+      "rules": [
+        {
+          "id": "AML-001",
+          "name": "Large Transaction Reporting",
+          "description": "Flag any single transaction exceeding $10,000 for CTR filing",
+          "type": "threshold",
+          "severity": "high",
+          "condition": {
+            "column": "Amount",
+            "operator": ">",
+            "value": 10000
+          },
+          "action": "flag_for_review",
+          "regulation": "Bank Secrecy Act",
+          "article": "31 CFR 1010.311"
+        },
+        {
+          "id": "AML-002",
+          "name": "Structuring Detection - Near Threshold",
+          "description": "Flag transactions between $9,000 and $9,999 (potential structuring)",
+          "type": "range",
+          "severity": "critical",
+          "condition": {
+            "column": "Amount",
+            "operator": "between",
+            "min_value": 9000,
+            "max_value": 9999
+          },
+          "action": "flag_for_review",
+          "regulation": "Anti-Structuring Laws",
+          "article": "31 USC 5324"
+        },
+        {
+          "id": "AML-003",
+          "name": "Laundering Flag Check",
+          "description": "Identify transactions already flagged as potential money laundering",
+          "type": "flag_check",
+          "severity": "critical",
+          "condition": {
+            "column": "Is_Laundering",
+            "operator": "==",
+            "value": 1
+          },
+          "action": "immediate_review",
+          "regulation": "AML Compliance"
+        },
+        {
+          "id": "AML-004",
+          "name": "Velocity Check - Same Beneficiary",
+          "description": "Flag more than 5 transfers to same beneficiary within 24 hours",
+          "type": "velocity",
+          "severity": "high",
+          "condition": {
+            "group_by": ["From_Account", "To_Account"],
+            "time_window": "24h",
+            "count_threshold": 5
+          },
+          "action": "flag_for_review",
+          "regulation": "Bank Secrecy Act"
+        },
+        {
+          "id": "AML-005",
+          "name": "High-Risk Transaction Type",
+          "description": "Monitor crypto and cash transactions above threshold",
+          "type": "composite",
+          "severity": "high",
+          "condition": {
+            "all": [
+              {
+                "column": "Payment_Format",
+                "operator": "in",
+                "value": ["Crypto", "Cash"]
+              },
+              { "column": "Amount", "operator": ">", "value": 3000 }
+            ]
+          },
+          "action": "enhanced_due_diligence",
+          "regulation": "FATF Guidelines"
+        },
+        {
+          "id": "AML-006",
+          "name": "New Account Large Transaction",
+          "description": "Flag large transactions from accounts less than 90 days old",
+          "type": "composite",
+          "severity": "medium",
+          "condition": {
+            "all": [
+              { "column": "Account_Age_Days", "operator": "<", "value": 90 },
+              { "column": "Amount", "operator": ">", "value": 5000 }
+            ]
+          },
+          "action": "manager_approval",
+          "regulation": "Internal Policy"
+        },
+        {
+          "id": "AML-007",
+          "name": "First Transaction Alert",
+          "description": "Review first transactions from accounts exceeding $5,000",
+          "type": "composite",
+          "severity": "medium",
+          "condition": {
+            "all": [
+              {
+                "column": "Is_First_Transaction",
+                "operator": "==",
+                "value": 1
+              },
+              { "column": "Amount", "operator": ">", "value": 5000 }
+            ]
+          },
+          "action": "verification_required",
+          "regulation": "Internal Policy"
+        },
+        {
+          "id": "AML-008",
+          "name": "Cross-Border Wire Monitoring",
+          "description": "International wires above $5,000 require enhanced review",
+          "type": "composite",
+          "severity": "medium",
+          "condition": {
+            "all": [
+              {
+                "column": "Transaction_Type",
+                "operator": "==",
+                "value": "TRANSFER"
+              },
+              {
+                "column": "From_Bank",
+                "operator": "!=",
+                "column_ref": "To_Bank"
+              },
+              { "column": "Amount", "operator": ">", "value": 5000 }
+            ]
+          },
+          "action": "enhanced_review",
+          "regulation": "FATF Guidelines"
+        }
+      ]
+    },
+    "paysim_transactions": {
+      "name": "PaySim Fraud Detection Rules",
+      "policy_source": "fraud_detection_policy.md",
+      "dataset": "PaySim Financial Dataset",
+      "rules": [
+        {
+          "id": "FRAUD-001",
+          "name": "Confirmed Fraud Detection",
+          "description": "Identify transactions marked as fraudulent",
+          "type": "flag_check",
+          "severity": "critical",
+          "condition": {
+            "column": "isFraud",
+            "operator": "==",
+            "value": 1
+          },
+          "action": "block_and_investigate",
+          "regulation": "Internal Fraud Policy"
+        },
+        {
+          "id": "FRAUD-002",
+          "name": "System Flagged Fraud",
+          "description": "Transactions flagged by automated fraud detection",
+          "type": "flag_check",
+          "severity": "high",
+          "condition": {
+            "column": "isFlaggedFraud",
+            "operator": "==",
+            "value": 1
+          },
+          "action": "manual_review",
+          "regulation": "Internal Fraud Policy"
+        },
+        {
+          "id": "FRAUD-003",
+          "name": "Large Transfer Alert",
+          "description": "TRANSFER transactions exceeding $200,000",
+          "type": "composite",
+          "severity": "high",
+          "condition": {
+            "all": [
+              { "column": "type", "operator": "==", "value": "TRANSFER" },
+              { "column": "amount", "operator": ">", "value": 200000 }
+            ]
+          },
+          "action": "manager_approval",
+          "regulation": "Internal Fraud Policy"
+        },
+        {
+          "id": "FRAUD-004",
+          "name": "Large Cash Out Alert",
+          "description": "CASH_OUT transactions exceeding $100,000",
+          "type": "composite",
+          "severity": "high",
+          "condition": {
+            "all": [
+              { "column": "type", "operator": "==", "value": "CASH_OUT" },
+              { "column": "amount", "operator": ">", "value": 100000 }
+            ]
+          },
+          "action": "flag_for_review",
+          "regulation": "Internal Fraud Policy"
+        },
+        {
+          "id": "FRAUD-005",
+          "name": "Zero Balance After Transaction",
+          "description": "Flag transactions that drain account to zero",
+          "type": "composite",
+          "severity": "high",
+          "condition": {
+            "all": [
+              { "column": "newbalanceOrig", "operator": "==", "value": 0 },
+              { "column": "amount", "operator": ">", "value": 1000 }
+            ]
+          },
+          "action": "flag_for_review",
+          "regulation": "Internal Fraud Policy"
+        },
+        {
+          "id": "FRAUD-006",
+          "name": "Balance Discrepancy Check",
+          "description": "Verify balance calculations are correct",
+          "type": "calculation",
+          "severity": "critical",
+          "condition": {
+            "formula": "abs(oldbalanceOrg - amount - newbalanceOrig) > 0.01",
+            "where": "type NOT IN ('CASH_IN', 'DEBIT')"
+          },
+          "action": "investigate_immediately",
+          "regulation": "Internal Controls"
+        },
+        {
+          "id": "FRAUD-007",
+          "name": "Very Large Transaction Block",
+          "description": "Block TRANSFER transactions exceeding $500,000",
+          "type": "composite",
+          "severity": "critical",
+          "condition": {
+            "all": [
+              { "column": "type", "operator": "==", "value": "TRANSFER" },
+              { "column": "amount", "operator": ">", "value": 500000 }
+            ]
+          },
+          "action": "block_transaction",
+          "regulation": "Internal Fraud Policy"
+        }
+      ]
+    },
+    "employee_compliance": {
+      "name": "Employee Policy Compliance Rules",
+      "policy_source": "employee_compliance_policy.md",
+      "dataset": "Employee Policy Compliance Dataset",
+      "rules": [
+        {
+          "id": "EMP-001",
+          "name": "Low Attendance Rate",
+          "description": "Flag employees with attendance rate below 85%",
+          "type": "threshold",
+          "severity": "critical",
+          "condition": {
+            "column": "attendance_rate",
+            "operator": "<",
+            "value": 0.85
+          },
+          "action": "hr_notification",
+          "regulation": "Internal HR Policy"
+        },
+        {
+          "id": "EMP-002",
+          "name": "Warning Attendance Rate",
+          "description": "Monitor employees with attendance rate below 90%",
+          "type": "threshold",
+          "severity": "medium",
+          "condition": {
+            "column": "attendance_rate",
+            "operator": "<",
+            "value": 0.9
+          },
+          "action": "manager_notification",
+          "regulation": "Internal HR Policy"
+        },
+        {
+          "id": "EMP-003",
+          "name": "Mandatory Training Not Completed",
+          "description": "Flag employees who haven't completed mandatory training",
+          "type": "flag_check",
+          "severity": "high",
+          "condition": {
+            "column": "mandatory_training_completed",
+            "operator": "==",
+            "value": false
+          },
+          "action": "training_reminder",
+          "regulation": "Internal HR Policy"
+        },
+        {
+          "id": "EMP-004",
+          "name": "Leave Policy Violation",
+          "description": "Identify employees who have violated leave policy",
+          "type": "flag_check",
+          "severity": "high",
+          "condition": {
+            "column": "leave_policy_violation",
+            "operator": "==",
+            "value": true
+          },
+          "action": "hr_review",
+          "regulation": "Internal HR Policy"
+        },
+        {
+          "id": "EMP-005",
+          "name": "Leave Overage",
+          "description": "Flag employees using more than allocated leave days",
+          "type": "comparison",
+          "severity": "high",
+          "condition": {
+            "column": "leave_days_used",
+            "operator": ">",
+            "column_ref": "leave_days_allowed"
+          },
+          "action": "payroll_adjustment",
+          "regulation": "Internal HR Policy"
+        },
+        {
+          "id": "EMP-006",
+          "name": "Invalid Security Clearance",
+          "description": "Flag employees with expired security clearance",
+          "type": "flag_check",
+          "severity": "critical",
+          "condition": {
+            "column": "security_clearance_valid",
+            "operator": "==",
+            "value": false
+          },
+          "action": "access_revocation",
+          "regulation": "Security Policy"
+        },
+        {
+          "id": "EMP-007",
+          "name": "Missing NDA",
+          "description": "Flag employees who haven't signed NDA (critical compliance)",
+          "type": "flag_check",
+          "severity": "critical",
+          "condition": {
+            "column": "nda_signed",
+            "operator": "==",
+            "value": false
+          },
+          "action": "immediate_hr_action",
+          "regulation": "Security Policy"
+        },
+        {
+          "id": "EMP-008",
+          "name": "Low Compliance Score",
+          "description": "Flag employees with compliance score below 70%",
+          "type": "threshold",
+          "severity": "high",
+          "condition": {
+            "column": "compliance_score",
+            "operator": "<",
+            "value": 0.7
+          },
+          "action": "pip_consideration",
+          "regulation": "Internal HR Policy"
+        },
+        {
+          "id": "EMP-009",
+          "name": "Critical Compliance Score",
+          "description": "Immediate intervention for compliance score below 60%",
+          "type": "threshold",
+          "severity": "critical",
+          "condition": {
+            "column": "compliance_score",
+            "operator": "<",
+            "value": 0.6
+          },
+          "action": "immediate_hr_intervention",
+          "regulation": "Internal HR Policy"
+        }
+      ]
+    }
+  },
+  "severity_definitions": {
+    "critical": {
+      "level": 1,
+      "description": "Immediate action required - regulatory or security risk",
+      "response_time": "immediate",
+      "escalation": "Director level"
+    },
+    "high": {
+      "level": 2,
+      "description": "Significant compliance issue - requires prompt attention",
+      "response_time": "within 24 hours",
+      "escalation": "Manager level"
+    },
+    "medium": {
+      "level": 3,
+      "description": "Notable compliance concern - requires investigation",
+      "response_time": "within 72 hours",
+      "escalation": "Team lead level"
+    },
+    "low": {
+      "level": 4,
+      "description": "Minor deviation - documentation and monitoring",
+      "response_time": "within 7 days",
+      "escalation": "Self-resolution"
+    }
+  },
+  "action_definitions": {
+    "flag_for_review": "Add to review queue for compliance officer",
+    "immediate_review": "Escalate immediately to compliance team",
+    "manager_approval": "Require manager sign-off before proceeding",
+    "block_transaction": "Prevent transaction from completing",
+    "block_and_investigate": "Block and initiate fraud investigation",
+    "manual_review": "Queue for manual review",
+    "enhanced_due_diligence": "Apply enhanced KYC/AML checks",
+    "verification_required": "Contact customer for verification",
+    "enhanced_review": "Additional documentation required",
+    "investigate_immediately": "Critical - immediate investigation",
+    "hr_notification": "Notify HR department",
+    "manager_notification": "Notify direct manager",
+    "training_reminder": "Send training completion reminder",
+    "hr_review": "Schedule HR review meeting",
+    "payroll_adjustment": "Initiate payroll deduction if needed",
+    "access_revocation": "Revoke system access immediately",
+    "immediate_hr_action": "HR must address within 24 hours",
+    "pip_consideration": "Consider Performance Improvement Plan"
+  }
+}

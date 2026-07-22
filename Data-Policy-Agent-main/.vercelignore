@@ -1,0 +1,10 @@
+# Ignore Python backend
+src/
+data/
+examples/
+requirements.txt
+*.py
+__pycache__/
+*.pyc
+.venv/
+venv/
