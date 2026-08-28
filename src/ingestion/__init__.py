@@ -1,6 +1,4 @@
-"""
-Ingestion Package - PDF parsing and rule extraction modules
-"""
+"""Ingestion module initialization"""
 from .pdf_parser import PDFParser
 from .rule_extractor import RuleExtractor
 

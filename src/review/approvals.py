@@ -1,219 +1,247 @@
 """
-Approval Management - Tracks review decisions and approval workflows
+Approvals Module - Multi-level approval management for compliance decisions.
 """
 import uuid
-from datetime import datetime
 from typing import Dict, Any, List, Optional
+from datetime import datetime
+from enum import Enum
+from loguru import logger
+
+
+class ApprovalLevel(str, Enum):
+    """Approval hierarchy levels"""
+    L1_DATA_STEWARD = "l1_data_steward"
+    L2_COMPLIANCE_TEAM = "l2_compliance_team"
+    L3_COMPLIANCE_OFFICER = "l3_compliance_officer"
+    L4_EXECUTIVE = "l4_executive"
 
 
 class ApprovalManager:
     """
-    Manages approval workflows for compliance violations.
-    Tracks decisions, maintains audit trails, and handles escalations.
+    Manages multi-level approval workflows for compliance decisions.
     """
-
+    
+    # Approval matrix based on violation severity and type
+    APPROVAL_MATRIX = {
+        "critical": {
+            "required_levels": [ApprovalLevel.L2_COMPLIANCE_TEAM, ApprovalLevel.L3_COMPLIANCE_OFFICER],
+            "escalate_to": ApprovalLevel.L4_EXECUTIVE
+        },
+        "high": {
+            "required_levels": [ApprovalLevel.L2_COMPLIANCE_TEAM],
+            "escalate_to": ApprovalLevel.L3_COMPLIANCE_OFFICER
+        },
+        "medium": {
+            "required_levels": [ApprovalLevel.L1_DATA_STEWARD],
+            "escalate_to": ApprovalLevel.L2_COMPLIANCE_TEAM
+        },
+        "low": {
+            "required_levels": [],
+            "escalate_to": ApprovalLevel.L1_DATA_STEWARD
+        }
+    }
+    
     def __init__(self):
-        """Initialize the approval manager."""
+        """Initialize approval manager."""
         self.approvals: Dict[str, Dict[str, Any]] = {}
-        self.decision_log: List[Dict[str, Any]] = []
-
-    def record_decision(
+        self.approval_history: List[Dict[str, Any]] = []
+    
+    async def create_approval_request(
         self,
-        violation_id: str,
         review_id: str,
-        decision: str,
-        reviewer: str,
-        comments: Optional[str] = None
-    ) -> str:
+        violations: List[Dict[str, Any]],
+        requested_action: str,
+        requester: str
+    ) -> Dict[str, Any]:
         """
-        Record a review decision for a violation.
-
+        Create an approval request for a compliance decision.
+        
         Args:
-            violation_id: ID of the violation being reviewed
-            review_id: ID of the review task
-            decision: Decision made ('approve', 'reject', 'escalate')
-            reviewer: ID or name of the reviewer
-            comments: Optional comments from the reviewer
-
+            review_id: Associated review ID
+            violations: Violations requiring approval
+            requested_action: Action requiring approval
+            requester: Who is requesting approval
+            
         Returns:
-            Approval record ID
+            Approval request record
         """
         approval_id = str(uuid.uuid4())
-
-        approval_record = {
-            'id': approval_id,
-            'violation_id': violation_id,
-            'review_id': review_id,
-            'decision': decision,
-            'reviewer': reviewer,
-            'comments': comments,
-            'timestamp': datetime.utcnow().isoformat(),
-            'status': 'approved' if decision == 'approve' else 'pending'
+        
+        # Determine required approval levels based on severity
+        max_severity = self._get_max_severity(violations)
+        approval_config = self.APPROVAL_MATRIX.get(max_severity, self.APPROVAL_MATRIX['medium'])
+        
+        approval = {
+            "id": approval_id,
+            "review_id": review_id,
+            "violation_ids": [v['id'] for v in violations],
+            "requested_action": requested_action,
+            "requester": requester,
+            "max_severity": max_severity,
+            "required_levels": [level.value for level in approval_config['required_levels']],
+            "escalate_to": approval_config['escalate_to'].value,
+            "approvals_received": [],
+            "status": "pending",
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
         }
-
-        self.approvals[approval_id] = approval_record
-
-        # Add to decision log
-        self.decision_log.append({
-            'type': 'decision',
-            'approval_id': approval_id,
-            'violation_id': violation_id,
-            'decision': decision,
-            'reviewer': reviewer,
-            'timestamp': approval_record['timestamp']
-        })
-
-        return approval_id
-
-    def escalate_violation(
-        self,
-        violation_id: str,
-        reason: str,
-        escalation_level: str = 'manager'
-    ) -> str:
-        """
-        Escalate a violation to a higher authority.
-
-        Args:
-            violation_id: ID of the violation to escalate
-            reason: Reason for escalation
-            escalation_level: Level of escalation ('manager', 'director', 'legal')
-
-        Returns:
-            Escalation record ID
-        """
-        escalation_id = str(uuid.uuid4())
-
-        escalation_record = {
-            'id': escalation_id,
-            'violation_id': violation_id,
-            'reason': reason,
-            'escalation_level': escalation_level,
-            'escalated_at': datetime.utcnow().isoformat(),
-            'status': 'escalated'
-        }
-
-        self.approvals[escalation_id] = escalation_record
-
-        # Add to decision log
-        self.decision_log.append({
-            'type': 'escalation',
-            'escalation_id': escalation_id,
-            'violation_id': violation_id,
-            'reason': reason,
-            'escalation_level': escalation_level,
-            'timestamp': escalation_record['escalated_at']
-        })
-
-        return escalation_id
-
-    def get_approvals_for_violation(
-        self,
-        violation_id: str
-    ) -> List[Dict[str, Any]]:
-        """
-        Get all approvals related to a specific violation.
-
-        Args:
-            violation_id: ID of the violation
-
-        Returns:
-            List of approval records
-        """
-        return [
-            approval for approval in self.approvals.values()
-            if approval.get('violation_id') == violation_id
-        ]
-
-    def get_approval(self
-        self,
-        approval_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Get a specific approval record.
-
-        Args:
-            approval_id: ID of the approval
-
-        Returns:
-            Approval record if found, None otherwise
-        """
-        return self.approvals.get(approval_id)
-
-    def update_approval_status(
+        
+        self.approvals[approval_id] = approval
+        
+        logger.info(f"Created approval request {approval_id} requiring {len(approval_config['required_levels'])} levels")
+        
+        return approval
+    
+    async def submit_approval(
         self,
         approval_id: str,
-        status: str
-    ) -> bool:
+        approver: str,
+        approver_level: str,
+        approved: bool,
+        comments: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        Update the status of an approval record.
-
+        Submit an approval decision.
+        
         Args:
-            approval_id: ID of the approval
-            status: New status ('approved', 'rejected', 'escalated', 'resolved')
-
+            approval_id: Approval request ID
+            approver: Approver identifier
+            approver_level: Approver's authorization level
+            approved: Whether approved
+            comments: Optional comments
+            
         Returns:
-            True if update was successful, False if approval not found
+            Updated approval record
         """
-        if approval_id not in self.approvals:
-            return False
-
-        self.approvals[approval_id]['status'] = status
-        self.approvals[approval_id]['updated_at'] = datetime.utcnow().isoformat()
-
-        return True
-
-    def get_decision_history(
+        approval = self.approvals.get(approval_id)
+        if not approval:
+            raise ValueError(f"Approval {approval_id} not found")
+        
+        # Validate approver level
+        try:
+            level = ApprovalLevel(approver_level)
+        except ValueError:
+            raise ValueError(f"Invalid approver level: {approver_level}")
+        
+        # Check if this level is required
+        if level.value not in approval['required_levels'] and level.value != approval['escalate_to']:
+            logger.warning(f"Approver level {level.value} not in required levels for approval {approval_id}")
+        
+        # Record approval
+        approval_record = {
+            "approver": approver,
+            "level": level.value,
+            "approved": approved,
+            "comments": comments,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        approval['approvals_received'].append(approval_record)
+        approval['updated_at'] = datetime.utcnow().isoformat()
+        
+        # Check if approval is complete
+        if approved:
+            received_levels = set(a['level'] for a in approval['approvals_received'] if a['approved'])
+            required_levels = set(approval['required_levels'])
+            
+            if required_levels <= received_levels:
+                approval['status'] = 'approved'
+                approval['completed_at'] = datetime.utcnow().isoformat()
+        else:
+            approval['status'] = 'rejected'
+            approval['rejected_by'] = approver
+            approval['rejection_reason'] = comments
+            approval['completed_at'] = datetime.utcnow().isoformat()
+        
+        # Store in history
+        self.approval_history.append({
+            "approval_id": approval_id,
+            "action": "approved" if approved else "rejected",
+            "approver": approver,
+            "level": level.value,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+        return approval
+    
+    async def get_pending_approvals(
         self,
-        violation_id: Optional[str] = None
+        approver_level: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Get the decision history for a violation or all violations.
-
+        Get pending approvals, optionally filtered by level.
+        
         Args:
-            violation_id: Optional violation ID to filter by
-
+            approver_level: Filter by approval level
+            
         Returns:
-            List of decision log entries
+            List of pending approvals
         """
-        if violation_id:
-            return [
-                entry for entry in self.decision_log
-                if entry.get('violation_id') == violation_id
+        pending = [a for a in self.approvals.values() if a['status'] == 'pending']
+        
+        if approver_level:
+            pending = [
+                a for a in pending 
+                if approver_level in a['required_levels'] 
+                or approver_level == a['escalate_to']
             ]
-        return self.decision_log.copy()
-
-    def get_approval_statistics(self) -> Dict[str, Any]:
+        
+        return pending
+    
+    async def escalate_approval(
+        self,
+        approval_id: str,
+        reason: str,
+        escalated_by: str
+    ) -> Dict[str, Any]:
         """
-        Get statistics about approvals.
-
+        Escalate an approval to the next level.
+        
+        Args:
+            approval_id: Approval to escalate
+            reason: Reason for escalation
+            escalated_by: Who escalated
+            
         Returns:
-            Dictionary with approval statistics
+            Updated approval record
         """
-        total_approvals = len(self.approvals)
-
-        decisions = [a for a in self.approvals.values() if 'decision' in a]
-        escalations = [a for a in self.approvals.values() if 'escalation_level' in a]
-
-        by_decision = {'approve': 0, 'reject': 0, 'escalate': 0}
-        for decision in decisions:
-            by_decision[decision['decision']] += 1
-
-        by_status = {'approved': 0, 'pending': 0, 'escalated': 0, 'resolved': 0}
-        for approval in self.approvals.values():
-            status = approval.get('status', 'pending')
-            by_status[status] += 1
-
-        by_level = {'manager': 0, 'director': 0, 'legal': 0}
-        for escalation in escalations:
-            level = escalation.get('escalation_level', 'manager')
-            by_level[level] += 1
-
+        approval = self.approvals.get(approval_id)
+        if not approval:
+            raise ValueError(f"Approval {approval_id} not found")
+        
+        # Add escalation level to required levels
+        if approval['escalate_to'] not in approval['required_levels']:
+            approval['required_levels'].append(approval['escalate_to'])
+        
+        approval['escalated'] = True
+        approval['escalation_reason'] = reason
+        approval['escalated_by'] = escalated_by
+        approval['escalated_at'] = datetime.utcnow().isoformat()
+        approval['updated_at'] = datetime.utcnow().isoformat()
+        
+        return approval
+    
+    def _get_max_severity(self, violations: List[Dict[str, Any]]) -> str:
+        """Get the maximum severity from a list of violations."""
+        severity_order = ['critical', 'high', 'medium', 'low']
+        
+        for severity in severity_order:
+            if any(v.get('severity') == severity for v in violations):
+                return severity
+        
+        return 'medium'
+    
+    def get_approval_statistics(self) -> Dict[str, Any]:
+        """Get approval statistics."""
+        total = len(self.approvals)
+        pending = len([a for a in self.approvals.values() if a['status'] == 'pending'])
+        approved = len([a for a in self.approvals.values() if a['status'] == 'approved'])
+        rejected = len([a for a in self.approvals.values() if a['status'] == 'rejected'])
+        
         return {
-            'total_approvals': total_approvals,
-            'by_decision': by_decision,
-            'by_status': by_status,
-            'by_escalation_level': by_level,
-            'total_escalations': len(escalations),
-            'recent_decisions': list(reversed(self.decision_log[-10:]))
+            "total_requests": total,
+            "pending": pending,
+            "approved": approved,
+            "rejected": rejected,
+            "approval_rate": round(approved / (approved + rejected) * 100, 2) if (approved + rejected) > 0 else 0
         }

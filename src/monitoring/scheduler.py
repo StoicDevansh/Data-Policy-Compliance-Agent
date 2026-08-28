@@ -1,161 +1,271 @@
 """
-Monitoring Scheduler - Handles periodic compliance scanning
+Monitoring Scheduler - Periodic compliance monitoring with APScheduler.
 """
 import asyncio
-import uuid
-from datetime import datetime, timedelta
-from typing import Optional, Callable, Dict, Any, Awaitable
+from typing import Dict, Any, Optional, Callable, List
+from datetime import datetime
+from loguru import logger
+
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+    from apscheduler.triggers.cron import CronTrigger
+    SCHEDULER_AVAILABLE = True
+except ImportError:
+    SCHEDULER_AVAILABLE = False
 
 
 class MonitoringScheduler:
     """
-    Scheduler for periodic compliance scanning operations.
-    Runs automated scans at configured intervals and handles callbacks for results.
+    Schedules and manages periodic compliance monitoring jobs.
     """
-
+    
     def __init__(
         self,
         agent: Any,
         interval_seconds: int = 3600,
-        callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None
+        callback: Optional[Callable] = None
     ):
         """
-        Initialize the monitoring scheduler.
-
+        Initialize monitoring scheduler.
+        
         Args:
-            agent: The DataPolicyAgent instance to run scans on
-            interval_seconds: Interval between scans in seconds (default: 1 hour)
-            callback: Optional async callback function to handle scan results
+            agent: DataPolicyAgent instance
+            interval_seconds: Default monitoring interval
+            callback: Optional callback for new violations
         """
         self.agent = agent
         self.interval_seconds = interval_seconds
         self.callback = callback
-        self.scheduler_task: Optional[asyncio.Task] = None
+        self.scheduler = None
         self.is_running = False
-        self.scheduler_id = str(uuid.uuid4())
-        self.next_scheduled_run: Optional[datetime] = None
-        self.last_run_time: Optional[datetime] = None
-        self.error_count = 0
-        self.success_count = 0
-
-    async def start(self) -> bool:
-        """
-        Start the monitoring scheduler.
-
-        Returns:
-            True if scheduler started successfully, False otherwise
-        """
+        self.job_history: List[Dict[str, Any]] = []
+        self.last_run: Optional[str] = None
+        self.violation_trends: List[Dict[str, Any]] = []
+        
+        if not SCHEDULER_AVAILABLE:
+            logger.warning("APScheduler not available. Install with: pip install apscheduler")
+    
+    async def start(self):
+        """Start the monitoring scheduler."""
+        if not SCHEDULER_AVAILABLE:
+            logger.error("Cannot start scheduler: APScheduler not available")
+            return
+        
         if self.is_running:
-            return False
-
+            logger.warning("Scheduler is already running")
+            return
+        
+        self.scheduler = AsyncIOScheduler()
+        
+        # Add main monitoring job
+        self.scheduler.add_job(
+            self._run_monitoring_job,
+            IntervalTrigger(seconds=self.interval_seconds),
+            id='compliance_monitoring',
+            name='Periodic Compliance Monitoring',
+            replace_existing=True
+        )
+        
+        self.scheduler.start()
         self.is_running = True
-        self.scheduler_task = asyncio.create_task(self._monitoring_loop())
-        return True
-
-    async def stop(self) -> bool:
-        """
-        Stop the monitoring scheduler.
-
-        Returns:
-            True if scheduler stopped successfully, False otherwise
-        """
-        if not self.is_running:
-            return False
-
-        self.is_running = False
-        if self.scheduler_task:
-            self.scheduler_task.cancel()
-            try:
-                await self.scheduler_task
-            except asyncio.CancelledError:
-                pass
-            self.scheduler_task = None
-
-        return True
-
-    async def _monitoring_loop(self) -> None:
-        """Main monitoring loop that runs periodic scans."""
-        while self.is_running:
-            try:
-                # Calculate next run time
-                self.next_scheduled_run = datetime.utcnow() + timedelta(seconds=self.interval_seconds)
-
-                # Wait for the interval
-                await asyncio.sleep(self.interval_seconds)
-
-                # Run the scan if still active
-                if self.is_running:
-                    await self._run_scheduled_scan()
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.error_count += 1
-                # Continue the loop despite errors
-                await asyncio.sleep(min(60, self.interval_seconds))  # Wait before retrying
-
-    async def _run_scheduled_scan(self) -> None:
-        """Run a scheduled compliance scan."""
-        try:
-            self.last_run_time = datetime.utcnow()
-
-            # Run a basic compliance scan
-            scan_results = await self.agent.scan_for_violations()
-
-            # Update success count
-            self.success_count += 1
-
-            # Call the callback if provided
-            if self.callback:
-                await self.callback(scan_results)
-
-        except Exception as e:
-            self.error_count += 1
-            # In a real implementation, we would log this error
-            pass
-
-    async def run_immediate_scan(self) -> Dict[str, Any]:
-        """
-        Run an immediate compliance scan outside of the schedule.
-
-        Returns:
-            Results from the compliance scan
-        """
-        try:
-            scan_results = await self.agent.scan_for_violations()
-            self.last_run_time = datetime.utcnow()
-            self.success_count += 1
-            return scan_results
-        except Exception as e:
-            self.error_count += 1
-            raise e
-
-    def get_schedule_status(self) -> Dict[str, Any]:
-        """
-        Get the current status of the scheduler.
-
-        Returns:
-            Dictionary with scheduler status information
-        """
-        return {
-            'scheduler_id': self.scheduler_id,
-            'is_running': self.is_running,
-            'interval_seconds': self.interval_seconds,
-            'next_scheduled_run': self.next_scheduled_run.isoformat() if self.next_scheduled_run else None,
-            'last_run_time': self.last_run_time.isoformat() if self.last_run_time else None,
-            'success_count': self.success_count,
-            'error_count': self.error_count,
-            'uptime_seconds': (
-                (datetime.utcnow() - self.last_run_time).total_seconds()
-                if self.last_run_time and self.is_running else 0
-            )
+        
+        logger.info(f"Started monitoring scheduler (interval: {self.interval_seconds}s)")
+        
+        # Run initial scan
+        await self._run_monitoring_job()
+    
+    async def stop(self):
+        """Stop the monitoring scheduler."""
+        if self.scheduler and self.is_running:
+            self.scheduler.shutdown(wait=False)
+            self.is_running = False
+            logger.info("Stopped monitoring scheduler")
+    
+    async def _run_monitoring_job(self):
+        """Execute a monitoring job."""
+        job_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        logger.info(f"Running monitoring job: {job_id}")
+        
+        job_record = {
+            "job_id": job_id,
+            "started_at": datetime.utcnow().isoformat(),
+            "status": "running"
         }
-
-    def update_interval(self, interval_seconds: int) -> None:
+        
+        try:
+            # Run compliance scan
+            violations = await self.agent.scan_for_violations()
+            
+            job_record["completed_at"] = datetime.utcnow().isoformat()
+            job_record["status"] = "completed"
+            job_record["violations_found"] = len(violations)
+            
+            # Track new violations (compared to last run)
+            new_violations = self._identify_new_violations(violations)
+            job_record["new_violations"] = len(new_violations)
+            
+            # Update trends
+            self._update_trends(violations)
+            
+            # Invoke callback if new violations found
+            if new_violations and self.callback:
+                try:
+                    if asyncio.iscoroutinefunction(self.callback):
+                        await self.callback(new_violations)
+                    else:
+                        self.callback(new_violations)
+                except Exception as e:
+                    logger.error(f"Callback error: {e}")
+            
+            self.last_run = datetime.utcnow().isoformat()
+            
+            logger.info(f"Monitoring job {job_id} completed: {len(violations)} total, {len(new_violations)} new violations")
+            
+        except Exception as e:
+            job_record["status"] = "failed"
+            job_record["error"] = str(e)
+            logger.error(f"Monitoring job {job_id} failed: {e}")
+        
+        self.job_history.append(job_record)
+        
+        # Keep only last 100 job records
+        if len(self.job_history) > 100:
+            self.job_history = self.job_history[-100:]
+    
+    def _identify_new_violations(
+        self,
+        current_violations: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Identify violations that are new since last run."""
+        # Get existing violation signatures
+        existing_signatures = set()
+        for v in self.agent.violations[:-len(current_violations)] if len(self.agent.violations) > len(current_violations) else []:
+            sig = f"{v.get('table')}:{v.get('column')}:{v.get('rule_id')}"
+            existing_signatures.add(sig)
+        
+        # Find new violations
+        new_violations = []
+        for v in current_violations:
+            sig = f"{v.get('table')}:{v.get('column')}:{v.get('rule_id')}"
+            if sig not in existing_signatures:
+                new_violations.append(v)
+        
+        return new_violations
+    
+    def _update_trends(self, violations: List[Dict[str, Any]]):
+        """Update violation trends for reporting."""
+        trend_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "total_violations": len(violations),
+            "by_severity": {},
+            "by_type": {}
+        }
+        
+        for v in violations:
+            sev = v.get('severity', 'unknown')
+            typ = v.get('rule_type', 'unknown')
+            
+            trend_entry["by_severity"][sev] = trend_entry["by_severity"].get(sev, 0) + 1
+            trend_entry["by_type"][typ] = trend_entry["by_type"].get(typ, 0) + 1
+        
+        self.violation_trends.append(trend_entry)
+        
+        # Keep only last 30 days of trends (assuming hourly checks = 720 entries)
+        if len(self.violation_trends) > 720:
+            self.violation_trends = self.violation_trends[-720:]
+    
+    async def add_custom_job(
+        self,
+        job_id: str,
+        func: Callable,
+        trigger_type: str = "interval",
+        **trigger_kwargs
+    ):
         """
-        Update the monitoring interval.
-
+        Add a custom monitoring job.
+        
         Args:
-            interval_seconds: New interval in seconds
+            job_id: Unique job identifier
+            func: Function to execute
+            trigger_type: 'interval' or 'cron'
+            **trigger_kwargs: Trigger-specific arguments
         """
-        self.interval_seconds = interval_seconds
+        if not self.scheduler:
+            logger.error("Scheduler not initialized. Call start() first.")
+            return
+        
+        if trigger_type == "interval":
+            trigger = IntervalTrigger(**trigger_kwargs)
+        elif trigger_type == "cron":
+            trigger = CronTrigger(**trigger_kwargs)
+        else:
+            raise ValueError(f"Unknown trigger type: {trigger_type}")
+        
+        self.scheduler.add_job(
+            func,
+            trigger,
+            id=job_id,
+            replace_existing=True
+        )
+        
+        logger.info(f"Added custom job: {job_id}")
+    
+    async def remove_job(self, job_id: str):
+        """Remove a scheduled job."""
+        if self.scheduler:
+            self.scheduler.remove_job(job_id)
+            logger.info(f"Removed job: {job_id}")
+    
+    def get_job_status(self) -> Dict[str, Any]:
+        """Get current scheduler status and job information."""
+        jobs = []
+        if self.scheduler:
+            for job in self.scheduler.get_jobs():
+                jobs.append({
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run": str(job.next_run_time) if job.next_run_time else None
+                })
+        
+        return {
+            "is_running": self.is_running,
+            "interval_seconds": self.interval_seconds,
+            "last_run": self.last_run,
+            "jobs": jobs,
+            "job_history_count": len(self.job_history),
+            "trend_data_points": len(self.violation_trends)
+        }
+    
+    def get_trends(self, limit: int = 24) -> List[Dict[str, Any]]:
+        """Get recent violation trends."""
+        return self.violation_trends[-limit:]
+    
+    def get_trend_summary(self) -> Dict[str, Any]:
+        """Get trend summary with change indicators."""
+        if len(self.violation_trends) < 2:
+            return {"insufficient_data": True}
+        
+        latest = self.violation_trends[-1]
+        previous = self.violation_trends[-2]
+        
+        # Calculate changes
+        total_change = latest["total_violations"] - previous["total_violations"]
+        
+        severity_changes = {}
+        for sev in ['critical', 'high', 'medium', 'low']:
+            latest_count = latest["by_severity"].get(sev, 0)
+            prev_count = previous["by_severity"].get(sev, 0)
+            severity_changes[sev] = {
+                "current": latest_count,
+                "previous": prev_count,
+                "change": latest_count - prev_count
+            }
+        
+        return {
+            "timestamp": latest["timestamp"],
+            "total_violations": latest["total_violations"],
+            "total_change": total_change,
+            "trend_direction": "increasing" if total_change > 0 else ("decreasing" if total_change < 0 else "stable"),
+            "severity_changes": severity_changes
+        }
